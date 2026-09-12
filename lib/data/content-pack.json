@@ -1,0 +1,55 @@
+{
+  "intro": [
+    "When you need {kw} in {cityName}, you need a trusted professional who responds fast. Our licensed {nichePluralLower} are ready 24 hours a day, 7 days a week.",
+    "{cityName} residents rely on {brandName} for dependable {kw}. Our certified {nichePluralLower} serve the entire {cityName} area with same-day service available.",
+    "Don't let a {nicheLower} problem disrupt your life. Our {cityName} {kw} specialists have the tools and experience to resolve any issue quickly — the first time.",
+    "For {kw} in {cityName}, our team of licensed, insured {nichePluralLower} brings years of hands-on experience and guaranteed workmanship to every job."
+  ],
+  "body1": [
+    "Our {cityName} {nichePluralLower} bring years of hands-on experience in {kw}. Every technician is fully licensed, insured, and background-checked. We use professional-grade equipment to ensure lasting results.",
+    "For {kw} in {cityName}, no job is too big or too small. We handle everything from routine maintenance to complex emergency repairs, always delivering the highest standard of workmanship.",
+    "{brandName} has built a reputation in {cityName} by providing honest, transparent {kw} at fair prices. We give upfront quotes with no hidden fees, and our technicians explain every step before they begin work.",
+    "When it comes to {kw} in {cityName}, our crew arrives on time, respects your property, and cleans up completely before leaving. All work is backed by a written guarantee."
+  ],
+  "body2": [
+    "Whether you're dealing with an urgent situation or planning a scheduled {kw} project in {cityName}, we make the process easy. Call us any time, day or night.",
+    "Our {kw} services in {cityName} are backed by a workmanship warranty. We stand behind every job, ensuring you have peace of mind long after our technicians leave.",
+    "When you choose {brandName} for {kw} in {cityName}, you're choosing a team that treats your property like their own. We clean up after every job and minimize disruption.",
+    "{cityName} residents trust us for {kw} because we show up on time, price jobs fairly, and never cut corners. Call {phoneNumber} to schedule service."
+  ],
+  "trustBulletSets": [
+    [
+      "Fully licensed and insured {kw} technicians",
+      "24/7 emergency response — no extra charge for nights or weekends",
+      "Upfront, transparent pricing — no hidden fees",
+      "All work backed by our workmanship guarantee",
+      "Locally trusted in {cityName}"
+    ],
+    [
+      "Same-day {kw} service available in {cityName}",
+      "Background-checked technicians — safe for your home and family",
+      "Free estimates on major jobs",
+      "We use only quality, code-compliant materials",
+      "Eco-friendly options available upon request"
+    ],
+    [
+      "Rapid response — most jobs dispatched within the hour",
+      "{cityName} residents have trusted us for years",
+      "Expert {kw} diagnosis — right the first time",
+      "Flexible appointment times including evenings and weekends",
+      "Fully equipped for on-the-spot repairs"
+    ]
+  ],
+  "faqCostAnswers": [
+    "The cost of {kw0} in {cityName} varies based on the scope of work. We provide free estimates on all major jobs and upfront quotes before any work begins. Call {phoneNumber} for a quote.",
+    "Pricing for {kw0} in {cityName} depends on factors like the severity and access required. We offer competitive, transparent pricing. Call us at {phoneNumber} for an accurate estimate."
+  ],
+  "faqArrivalAnswers": [
+    "For emergency {kw1} calls in {cityName}, we typically dispatch a technician within 30–60 minutes. For scheduled appointments, we offer same-day and next-day availability.",
+    "Our {cityName} {nichePluralLower} are strategically located for fast response. Emergency calls are typically answered within the hour."
+  ],
+  "faqBeforeArrivalAnswers": [
+    "For most service calls, just ensure the technician can access the work area. If there is an active problem, try to isolate it to minimize damage. Our dispatcher can walk you through any emergency steps.",
+    "Clear the work area so our technician has room to work safely. Our dispatcher can walk you through any emergency steps when you call {phoneNumber}."
+  ]
+}

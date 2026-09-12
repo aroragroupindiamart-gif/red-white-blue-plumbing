@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Environment variables — set these as GitHub Secrets instead
+.env.local
+.env*.local
+
+# Replit-specific
+.replit-artifact/
+.replit
+
+# OS
+.DS_Store
+Thumbs.db
