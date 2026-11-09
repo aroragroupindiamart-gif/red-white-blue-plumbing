@@ -101,6 +101,7 @@ export default async function StateOrHubPage({ params }: Props) {
 
   const allStateLocations = await getLocationsByState(stateCode);
   const displayLocations = drippedLocations.length > 0 ? drippedLocations : allStateLocations.slice(0, 10);
+  const t = (tokens as Record<string, any>)[ACTIVE_CONCEPT] || tokens.dispatch;
 
   const stateJsonLd = {
     "@context": "https://schema.org",
