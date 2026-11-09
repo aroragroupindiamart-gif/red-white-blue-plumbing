@@ -1,68 +1,48 @@
 # ============================================================
-# GitHub Actions — Build & Deploy to Cloudflare Pages
+# GitHub Actions — Build & Deploy to Cloudflare Workers
 # ============================================================
-# Required GitHub repository secrets (Settings → Secrets and variables → Actions):
-#
-#   CLOUDFLARE_API_TOKEN  — dash.cloudflare.com/profile/api-tokens
-#                           Use the "Edit Cloudflare Pages" template
-#   CLOUDFLARE_ACCOUNT_ID — right sidebar of dash.cloudflare.com
-#
-#   NEXT_PUBLIC_BRAND_NAME       e.g. "Ace Plumbing"
-#   NEXT_PUBLIC_PHONE_NUMBER     e.g. "(800) 123-4567"
-#   NEXT_PUBLIC_PHONE_TEL        e.g. "8001234567"
-#   NEXT_PUBLIC_SITE_URL         e.g. "https://aceplumbing.com"
-#   NEXT_PUBLIC_NICHE            e.g. "Plumbing"
-#   NEXT_PUBLIC_NICHE_PLURAL     e.g. "Plumbers"
-#   NEXT_PUBLIC_NICHE_SINGULAR   e.g. "Plumber"
-#   NEXT_PUBLIC_SCHEMA_TYPE      e.g. "Plumber"
-#
-# Optional secrets (leave blank to skip):
-#   NEXT_PUBLIC_GA_ID            Google Analytics 4 measurement ID
-#   NEXT_PUBLIC_ADSENSE_ID       Google AdSense publisher ID
-#   NEXT_PUBLIC_GSC_TOKEN        Google Search Console verification token
-#   NEXT_PUBLIC_CONTENT_SALT     Per-site content variant offset (see lib/spintax.ts).
-#                                Leave unset/0 for the original template site.
-# ============================================================
-
 name: Deploy to Cloudflare Pages
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      contents: read
-      deployments: write
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: 20
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Run Quality and Boilerplate Gates
+        run: pnpm run test:quality
 
       - name: Build for Cloudflare Workers
-        run: pnpm run build:cf
         env:
-          NODE_OPTIONS: "--max-old-space-size=6144"
-          NEXT_PUBLIC_BRAND_NAME: ${{ secrets.NEXT_PUBLIC_BRAND_NAME }}
           NEXT_PUBLIC_PHONE_NUMBER: ${{ secrets.NEXT_PUBLIC_PHONE_NUMBER }}
           NEXT_PUBLIC_PHONE_TEL: ${{ secrets.NEXT_PUBLIC_PHONE_TEL }}
+          NEXT_PUBLIC_BRAND_NAME: ${{ secrets.NEXT_PUBLIC_BRAND_NAME }}
           NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
           NEXT_PUBLIC_NICHE: ${{ secrets.NEXT_PUBLIC_NICHE }}
           NEXT_PUBLIC_NICHE_PLURAL: ${{ secrets.NEXT_PUBLIC_NICHE_PLURAL }}
@@ -73,9 +53,20 @@ jobs:
           NEXT_PUBLIC_GSC_TOKEN: ${{ secrets.NEXT_PUBLIC_GSC_TOKEN }}
           NEXT_PUBLIC_LAUNCH_DATE: ${{ secrets.NEXT_PUBLIC_LAUNCH_DATE }}
           NEXT_PUBLIC_CONTENT_SALT: ${{ secrets.NEXT_PUBLIC_CONTENT_SALT }}
+        run: pnpm run build:worker
 
       - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v4
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Purge Cloudflare Edge Cache
+        run: |
+          echo "Purging Cloudflare Edge Cache for Zone 92c65143ee08aae14acc6935b9034023..."
+          curl -s -X POST "https://api.cloudflare.com/client/v4/zones/92c65143ee08aae14acc6935b9034023/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}'
+          echo "Cache purge requested."

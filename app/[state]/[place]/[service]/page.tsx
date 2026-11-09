@@ -1,32 +1,80 @@
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import {
-  getLocation, getService,
+  getLocation, getLocationBySlugOnly, getService,
   getSiblingServices, getNearbyLocations,
-  isServiceAllowedForTier,
+  isLocationAndServiceAllowed,
+  getAllLocations, getAllServices,
 } from "@/lib/data";
 import {
   BRAND_NAME, PHONE_NUMBER, PHONE_TEL, SITE_URL,
-  NICHE, NICHE_PLURAL, NICHE_SINGULAR, SCHEMA_TYPE, CONTENT_SALT,
+  NICHE, NICHE_PLURAL, NICHE_SINGULAR, SCHEMA_TYPE, CONTENT_SALT, ACTIVE_CONCEPT,
 } from "@/lib/config";
 import { selectVariant } from "@/lib/spintax";
 import { CONTENT_PACK, renderTemplate } from "@/lib/content";
+import { generateLocalNarratives } from "@/lib/narrative";
 import Footer from "@/components/Footer";
+import {
+  DispatchCommandPage,
+  CredentialPremiumPage,
+  GuidedJourneyPage,
+  HyperlocalProofPage,
+  OneThumbSpeedPage,
+} from "@/components/landing-components";
+import { tokens } from "@/lib/tokens";
 
-export const revalidate = 3600;
+export const revalidate = 604800; // 7 days edge cache
 export const dynamicParams = true;
 
 interface Props {
   params: Promise<{ state: string; place: string; service: string }>;
 }
 
+const CONCEPT_MAP: Record<string, any> = {
+  dispatch: DispatchCommandPage,
+  credential: CredentialPremiumPage,
+  journey: GuidedJourneyPage,
+  hyperlocal: HyperlocalProofPage,
+  onethumb: OneThumbSpeedPage,
+};
+
+export async function generateStaticParams() {
+  // Pre-render top 50 metros x 10 core services (500 high-priority money pages) statically
+  const [allLocs, allSvcs] = await Promise.all([getAllLocations(), getAllServices()]);
+  const topMetros = allLocs.slice().sort((a, b) => b.population - a.population).slice(0, 50);
+  const coreServices = allSvcs.slice(0, 10);
+
+  const params: { state: string; place: string; service: string }[] = [];
+  for (const loc of topMetros) {
+    for (const svc of coreServices) {
+      params.push({
+        state: loc.state_code.toLowerCase(),
+        place: loc.place_slug,
+        service: svc.service_slug,
+      });
+    }
+  }
+  return params;
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { state, place, service: serviceSlug } = await params;
+
+  if (state.includes("{") || place.includes("{") || state.includes("$") || state.includes("&")) {
+    permanentRedirect("/");
+  }
+
   const stateCode = state.toUpperCase();
   const [loc, svc] = await Promise.all([getLocation(stateCode, place), getService(serviceSlug)]);
-  if (!loc || !svc) return { title: "Not Found" };
-  if (!(await isServiceAllowedForTier(svc.id, loc.tier))) return { title: "Not Found" };
+  if (!loc) {
+    const realLoc = getLocationBySlugOnly(place);
+    if (realLoc && svc) {
+      permanentRedirect(`/${realLoc.state_code.toLowerCase()}/${realLoc.place_slug}/${svc.service_slug}`);
+    }
+    return { title: "Not Found" };
+  }
+  if (!svc) return { title: "Not Found" };
 
   const title       = `${svc.service_name} in ${loc.place_name}, ${stateCode}`.slice(0, 60);
   const description = `Need ${svc.service_name.toLowerCase()} in ${loc.place_name}, ${loc.state_name}? ${BRAND_NAME} provides 24/7 licensed service. Call ${PHONE_NUMBER} now.`.slice(0, 155);
@@ -133,11 +181,22 @@ function getRating(locId: number, svcId: number): { rating: number; reviewCount:
 
 export default async function ServicePage({ params }: Props) {
   const { state, place, service: serviceSlug } = await params;
+
+  if (state.includes("{") || place.includes("{") || state.includes("$") || state.includes("&")) {
+    permanentRedirect("/");
+  }
+
   const stateCode = state.toUpperCase();
 
-  const [loc, svc] = await Promise.all([getLocation(stateCode, place), getService(serviceSlug)]);
-  if (!loc || !svc) notFound();
-  if (!(await isServiceAllowedForTier(svc.id, loc.tier))) notFound();
+  let [loc, svc] = await Promise.all([getLocation(stateCode, place), getService(serviceSlug)]);
+  if (!loc) {
+    const realLoc = getLocationBySlugOnly(place);
+    if (realLoc && svc) {
+      permanentRedirect(`/${realLoc.state_code.toLowerCase()}/${realLoc.place_slug}/${svc.service_slug}`);
+    }
+    notFound();
+  }
+  if (!svc) notFound();
 
   const [siblings, nearby] = await Promise.all([
     getSiblingServices(loc.id, svc.id, 5),
@@ -151,6 +210,9 @@ export default async function ServicePage({ params }: Props) {
   const body2   = bodyParagraph2(svc.service_name, loc.place_name, svc.base_keywords, loc.id, svc.id);
   const canonicalUrl = `${SITE_URL}/${stateCode.toLowerCase()}/${loc.place_slug}/${svc.service_slug}`;
   const { rating, reviewCount } = getRating(loc.id, svc.id);
+
+  // Generate real, data-driven local engineering narratives
+  const narratives = generateLocalNarratives(loc, svc);
 
   const serviceJsonLd = {
     "@context": "https://schema.org",
@@ -200,177 +262,162 @@ export default async function ServicePage({ params }: Props) {
     })),
   };
 
+  const SelectedConceptPage = CONCEPT_MAP[ACTIVE_CONCEPT] || DispatchCommandPage;
+  const activeTokens = (tokens as Record<string, any>)[ACTIVE_CONCEPT] || tokens.dispatch;
+
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceJsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
 
-      <div style={{ textAlign: "center", padding: "10px 24px", fontSize: "0.85rem", color: "#94a3b8", paddingTop: 80 }}>
-        <span style={{ color: "#f97316", fontWeight: 700 }}>
-          24/7 {svc.service_name.toUpperCase()} IN {loc.place_name.toUpperCase()}
-        </span>
-        {" "}&mdash; Serving All of {loc.state_name} &mdash;{" "}
-        <a href={`tel:${PHONE_TEL}`} style={{ color: "white", fontWeight: 700 }}>{PHONE_NUMBER}</a>
-      </div>
+      <SelectedConceptPage
+        state={loc.state_name}
+        stateCode={stateCode}
+        city={loc.place_name}
+        service={svc.service_name}
+        serviceSlug={svc.service_slug}
+        phone={PHONE_NUMBER}
+        phoneHref={`tel:${PHONE_TEL}`}
+        rating={rating}
+        reviewCount={reviewCount}
+        responseTime="30–45 min"
+        licenseNo="State Licensed & Insured"
+        brandName={BRAND_NAME}
+      />
 
-      <section className="hero-gradient" style={{ padding: "60px 24px" }}>
-        <div className="service-hero-grid" style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr auto", gap: 48, alignItems: "start" }}>
-          <div>
-            <nav style={{ marginBottom: 20, fontSize: "0.8rem", color: "#64748b" }}>
-              <Link href="/" style={{ color: "#64748b", textDecoration: "none" }}>Home</Link>
-              <span style={{ margin: "0 6px" }}>/</span>
-              <Link href={`/${stateCode.toLowerCase()}`} style={{ color: "#64748b", textDecoration: "none" }}>{loc.state_name}</Link>
-              <span style={{ margin: "0 6px" }}>/</span>
-              <Link href={`/${stateCode.toLowerCase()}/${loc.place_slug}`} style={{ color: "#64748b", textDecoration: "none" }}>{loc.place_name}</Link>
-              <span style={{ margin: "0 6px" }}>/</span>
-              <span style={{ color: "#94a3b8" }}>{svc.service_name}</span>
-            </nav>
-
-            <div style={{ fontSize: "0.75rem", fontWeight: 700, letterSpacing: "0.15em", color: "#f97316", marginBottom: 12 }}>
-              {svc.service_name.toUpperCase()} IN {loc.place_name.toUpperCase()}, {stateCode}
-            </div>
-
-            <h1 style={{ fontSize: "clamp(1.8rem, 4vw, 2.8rem)", fontWeight: 800, color: "white", lineHeight: 1.15, marginBottom: 20 }}>
-              {svc.service_name} in {loc.place_name}, {loc.state_name}
-            </h1>
-
-            <p style={{ color: "#94a3b8", fontSize: "1.05rem", lineHeight: 1.75, marginBottom: 28, maxWidth: 600 }}>
-              {intro}
+      {/* Local Infrastructure & Engineering Diagnostics Section */}
+      <section style={{ backgroundColor: activeTokens.palette.surface, padding: "52px 24px 56px", borderTop: `1px solid ${activeTokens.palette.line}` }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          <div style={{ marginBottom: 32 }}>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.15em", color: activeTokens.palette.accent }}>
+              Field Diagnostics & Local Context
+            </span>
+            <h2 style={{ fontSize: "1.85rem", fontWeight: 900, color: activeTokens.palette.text, marginTop: 8, marginBottom: 12 }}>
+              {svc.service_name} in {loc.place_name}, {stateCode}: Regional Standards & Diagnostics
+            </h2>
+            <p style={{ fontSize: "1rem", lineHeight: 1.6, color: activeTokens.palette.muted, maxWidth: 880 }}>
+              Delivering code-compliant, durable {svc.service_name.toLowerCase()} in {loc.place_name} demands precision knowledge of local municipal water chemistry, regional climate loads, and neighborhood building eras. Here is the operational data our technicians follow when servicing properties across {loc.county_name} County.
             </p>
+          </div>
 
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 28 }}>
-              <a href={`tel:${PHONE_TEL}`} className="btn-primary">Call for {svc.service_name}</a>
-              <a href="#about" className="btn-secondary">Learn More</a>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
-              {["Licensed & Insured", "24/7 Available", `${loc.place_name}-Wide Service`].map((badge) => (
-                <span key={badge} className="badge-pill">{badge}</span>
-              ))}
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ display: "flex", gap: 2 }}>
-                {[1, 2, 3, 4, 5].map((star) => {
-                  const filled  = star <= Math.floor(rating);
-                  const partial = !filled && star - 0.5 <= rating;
-                  const fill    = filled || partial ? "#f97316" : "#1e293b";
-                  return (
-                    <svg key={star} width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-                      {partial ? (
-                        <>
-                          <defs>
-                            <linearGradient id={`half-${star}`}>
-                              <stop offset="50%" stopColor="#f97316" />
-                              <stop offset="50%" stopColor="#1e293b" />
-                            </linearGradient>
-                          </defs>
-                          <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" fill={`url(#half-${star})`} stroke="#f97316" strokeWidth="1.5" />
-                        </>
-                      ) : (
-                        <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" fill={fill} stroke="#f97316" strokeWidth="1.5" />
-                      )}
-                    </svg>
-                  );
-                })}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20, marginBottom: 32 }}>
+            {/* Water Chemistry Block */}
+            <div style={{ backgroundColor: activeTokens.palette.bg, borderRadius: 14, padding: "24px 20px", border: `1px solid ${activeTokens.palette.line}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: "1.4rem" }}>💧</span>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: activeTokens.palette.text, margin: 0 }}>
+                  Water Chemistry & Mineral Dynamics
+                </h3>
               </div>
-              <span style={{ fontWeight: 700, color: "white", fontSize: "0.95rem" }}>{rating.toFixed(1)}</span>
-              <span style={{ color: "#64748b", fontSize: "0.85rem" }}>({reviewCount.toLocaleString()} reviews)</span>
+              <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: activeTokens.palette.muted, margin: 0 }}>
+                {narratives.waterDynamics}
+              </p>
             </div>
-          </div>
 
-          <div className="contact-card contact-card-wrapper" style={{ minWidth: 280, maxWidth: 320, padding: "28px 24px", flexShrink: 0 }}>
-            <div style={{ fontSize: "0.7rem", fontWeight: 800, letterSpacing: "0.2em", color: "#f97316", marginBottom: 12 }}>
-              EMERGENCY DISPATCH
-            </div>
-            <a href={`tel:${PHONE_TEL}`} style={{ display: "block", fontSize: "1.6rem", fontWeight: 800, color: "#0a0f1e", textDecoration: "none", marginBottom: 20, lineHeight: 1.2 }}>
-              {PHONE_NUMBER}
-            </a>
-            <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 16 }}>
-              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", color: "#64748b", marginBottom: 4 }}>SERVICE AREA</div>
-              <div style={{ fontWeight: 600, color: "#0a0f1e" }}>{loc.place_name}, {stateCode}</div>
-            </div>
-            <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16, marginBottom: 20 }}>
-              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", color: "#64748b", marginBottom: 4 }}>HOURS</div>
-              <div style={{ fontWeight: 600, color: "#0a0f1e" }}>Open 24 Hours</div>
-            </div>
-            <a href={`tel:${PHONE_TEL}`} style={{ display: "block", backgroundColor: "#f97316", color: "white", fontWeight: 800, padding: "14px", borderRadius: 6, textAlign: "center", textDecoration: "none" }}>
-              Call Now — Free Estimate
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section style={{ backgroundColor: "#0d1526", padding: "50px 24px", borderTop: "1px solid #1e293b", borderBottom: "1px solid #1e293b" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
-            {[
-              { icon: "★", title: "24/7 Service",        desc: `${svc.service_name} available around the clock — no extra charge for nights or weekends.` },
-              { icon: "⚡", title: "Rapid Response",      desc: `Most ${loc.place_name} calls dispatched within 60 minutes.` },
-              { icon: "📍", title: `${loc.place_name}-Wide`, desc: `We serve all neighborhoods throughout ${loc.place_name} and surrounding areas.` },
-              { icon: "✓",  title: "Licensed & Insured", desc: "All technicians are fully licensed, bonded, and carry comprehensive liability insurance." },
-            ].map((card) => (
-              <div key={card.title} className="feature-card" style={{ padding: "24px" }}>
-                <div style={{ fontSize: "1.5rem", marginBottom: 12 }}>{card.icon}</div>
-                <div style={{ fontWeight: 700, color: "white", marginBottom: 8 }}>{card.title}</div>
-                <div style={{ color: "#94a3b8", fontSize: "0.875rem", lineHeight: 1.6 }}>{card.desc}</div>
+            {/* Housing Era & Metallurgy Block */}
+            <div style={{ backgroundColor: activeTokens.palette.bg, borderRadius: 14, padding: "24px 20px", border: `1px solid ${activeTokens.palette.line}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: "1.4rem" }}>🏗️</span>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: activeTokens.palette.text, margin: 0 }}>
+                  Housing Age & Pipe Metallurgy
+                </h3>
               </div>
-            ))}
+              <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: activeTokens.palette.muted, margin: 0 }}>
+                {narratives.housingDiagnostic}
+              </p>
+            </div>
+
+            {/* Climate & Freeze Protocol Block */}
+            <div style={{ backgroundColor: activeTokens.palette.bg, borderRadius: 14, padding: "24px 20px", border: `1px solid ${activeTokens.palette.line}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: "1.4rem" }}>❄️</span>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: activeTokens.palette.text, margin: 0 }}>
+                  Frost Depth & Soil Conditions
+                </h3>
+              </div>
+              <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: activeTokens.palette.muted, margin: 0 }}>
+                {narratives.climateProtocol}
+              </p>
+            </div>
+          </div>
+
+          {/* Municipal Specifications Table */}
+          <div style={{ backgroundColor: activeTokens.palette.surfaceAlt || activeTokens.palette.bg, borderRadius: 14, padding: "22px 24px", border: `1px solid ${activeTokens.palette.line}` }}>
+            <h4 style={{ fontSize: "0.95rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: activeTokens.palette.text, marginBottom: 14 }}>
+              {loc.place_name} Municipal Engineering Specifications
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+              <div>
+                <span style={{ fontSize: "0.75rem", color: activeTokens.palette.muted, display: "block" }}>Water Provider / District</span>
+                <strong style={{ fontSize: "0.9rem", color: activeTokens.palette.text }}>{narratives.complianceSpecs.utilityDistrict}</strong>
+              </div>
+              <div>
+                <span style={{ fontSize: "0.75rem", color: activeTokens.palette.muted, display: "block" }}>Mineral Hardness Index</span>
+                <strong style={{ fontSize: "0.9rem", color: activeTokens.palette.text }}>{narratives.complianceSpecs.hardnessRating}</strong>
+              </div>
+              <div>
+                <span style={{ fontSize: "0.75rem", color: activeTokens.palette.muted, display: "block" }}>Operating Pressure Target</span>
+                <strong style={{ fontSize: "0.9rem", color: activeTokens.palette.text }}>{narratives.complianceSpecs.psiStandard}</strong>
+              </div>
+              <div>
+                <span style={{ fontSize: "0.75rem", color: activeTokens.palette.muted, display: "block" }}>Permitting & Inspection Authority</span>
+                <strong style={{ fontSize: "0.9rem", color: activeTokens.palette.text }}>{narratives.complianceSpecs.permitDepartment}</strong>
+              </div>
+            </div>
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${activeTokens.palette.line}`, fontSize: "0.82rem", color: activeTokens.palette.muted }}>
+              <strong>Code Compliance Note:</strong> {narratives.complianceSpecs.inspectionRequirement}
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="about" style={{ padding: "60px 24px" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "1.6rem", fontWeight: 700, color: "white", marginBottom: 20 }}>
-            About Our {svc.service_name} in {loc.place_name}
+      {/* Comprehensive Service Scope & Methodology */}
+      <section style={{ backgroundColor: activeTokens.palette.bg, padding: "48px 24px 54px" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: activeTokens.palette.text, marginBottom: 16 }}>
+            Professional {svc.service_name} Protocol in {loc.place_name}
           </h2>
-          <p style={{ color: "#94a3b8", lineHeight: 1.8, marginBottom: 20 }}>{body1}</p>
-          <p style={{ color: "#94a3b8", lineHeight: 1.8, marginBottom: 40 }}>{body2}</p>
-
-          <h2 style={{ fontSize: "1.6rem", fontWeight: 700, color: "white", marginBottom: 20 }}>
-            Why {loc.place_name} Residents Trust Us
-          </h2>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 14 }}>
-            {bullets.map((bullet, i) => (
-              <li key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                <span style={{ color: "#f97316", fontWeight: 700, marginTop: 2, flexShrink: 0 }}>✓</span>
-                <span style={{ color: "#94a3b8", lineHeight: 1.6 }}>{bullet}</span>
-              </li>
-            ))}
-          </ul>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
+            <div>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.65, color: activeTokens.palette.muted, marginBottom: 14 }}>
+                {intro}
+              </p>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.65, color: activeTokens.palette.muted, marginBottom: 14 }}>
+                {body1}
+              </p>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.65, color: activeTokens.palette.muted }}>
+                {body2}
+              </p>
+            </div>
+            <div style={{ backgroundColor: activeTokens.palette.surface, borderRadius: 14, padding: "24px", border: `1px solid ${activeTokens.palette.line}` }}>
+              <h3 style={{ fontSize: "1rem", fontWeight: 800, color: activeTokens.palette.text, marginBottom: 14 }}>
+                Verified Service Standards
+              </h3>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                {bullets.map((b, i) => (
+                  <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: "0.9rem", color: activeTokens.palette.muted }}>
+                    <span style={{ color: activeTokens.palette.accent, fontWeight: "bold" }}>✓</span>
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section style={{ backgroundColor: "#0d1526", padding: "60px 24px", borderTop: "1px solid #1e293b" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "1.6rem", fontWeight: 700, color: "white", marginBottom: 32 }}>
-            Frequently Asked Questions
-          </h2>
-          {faqs.map((faq, i) => (
-            <details key={i} className="faq-item">
-              <summary>
-                <h3 style={{ margin: 0, fontSize: "inherit", fontWeight: "inherit", color: "inherit", display: "inline" }}>{faq.q}</h3>
-                <span style={{ color: "#f97316", flexShrink: 0 }}>+</span>
-              </summary>
-              <div className="faq-answer">{faq.a}</div>
-            </details>
-          ))}
-        </div>
-      </section>
-
-      <section style={{ padding: "50px 24px 60px" }}>
-        <div className="two-col-grid" style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48 }}>
+      <section style={{ backgroundColor: activeTokens.palette.bg, padding: "48px 24px 60px", borderTop: `1px solid ${activeTokens.palette.line}` }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 36 }}>
           <div>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "white", marginBottom: 16 }}>
-              Other Services in {loc.place_name}
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: activeTokens.palette.text, marginBottom: 16 }}>
+              Other {NICHE} Services in {loc.place_name}
             </h3>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
               {siblings.map((s) => (
                 <li key={s.id}>
-                  <Link href={`/${stateCode.toLowerCase()}/${loc.place_slug}/${s.service_slug}`} style={{ color: "#94a3b8", textDecoration: "none", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: "#f97316" }}>→</span>
+                  <Link href={`/${stateCode.toLowerCase()}/${loc.place_slug}/${s.service_slug}`} style={{ color: activeTokens.palette.muted, textDecoration: "none", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: activeTokens.palette.accent }}>&rarr;</span>
                     {s.service_name} in {loc.place_name}
                   </Link>
                 </li>
@@ -378,32 +425,30 @@ export default async function ServicePage({ params }: Props) {
             </ul>
           </div>
           <div>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "white", marginBottom: 16 }}>Nearby Areas</h3>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: activeTokens.palette.text, marginBottom: 16 }}>
+              Nearby Service Areas in {loc.state_name}
+            </h3>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
               {nearby.map((n) => (
                 <li key={n.id}>
-                  <Link href={`/${stateCode.toLowerCase()}/${n.place_slug}/${svc.service_slug}`} style={{ color: "#94a3b8", textDecoration: "none", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: "#f97316" }}>→</span>
+                  <Link href={`/${stateCode.toLowerCase()}/${n.place_slug}/${svc.service_slug}`} style={{ color: activeTokens.palette.muted, textDecoration: "none", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: activeTokens.palette.accent }}>&rarr;</span>
                     {svc.service_name} in {n.place_name}, {stateCode}
                   </Link>
                 </li>
               ))}
             </ul>
           </div>
-        </div>
-      </section>
-
-      <section style={{ backgroundColor: "#f97316", padding: "48px 24px", textAlign: "center" }}>
-        <div style={{ maxWidth: 700, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "1.8rem", fontWeight: 800, color: "white", marginBottom: 12 }}>
-            Need {svc.service_name}? Call Now.
-          </h2>
-          <p style={{ color: "rgba(255,255,255,0.85)", marginBottom: 24 }}>
-            Our network of licensed {NICHE_PLURAL.toLowerCase()} is available 24/7, 365 days a year.
-          </p>
-          <a href={`tel:${PHONE_TEL}`} style={{ backgroundColor: "white", color: "#f97316", fontWeight: 800, padding: "16px 40px", borderRadius: 6, textDecoration: "none", fontSize: "1.15rem", display: "inline-block" }}>
-            {PHONE_NUMBER}
-          </a>
+          <div>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: activeTokens.palette.text, marginBottom: 16 }}>
+              Service Navigation
+            </h3>
+            <nav style={{ fontSize: "0.85rem", color: activeTokens.palette.muted, display: "flex", flexDirection: "column", gap: 10 }}>
+              <Link href="/" style={{ color: activeTokens.palette.muted, textDecoration: "none" }}>&larr; Return to Home</Link>
+              <Link href={`/${stateCode.toLowerCase()}`} style={{ color: activeTokens.palette.muted, textDecoration: "none" }}>&larr; View all {loc.state_name} Cities</Link>
+              <Link href={`/${stateCode.toLowerCase()}/${loc.place_slug}`} style={{ color: activeTokens.palette.muted, textDecoration: "none" }}>&larr; All Services in {loc.place_name}</Link>
+            </nav>
+          </div>
         </div>
       </section>
 
