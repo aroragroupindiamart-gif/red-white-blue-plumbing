@@ -5,23 +5,20 @@ name: Deploy to Cloudflare Pages
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    branches:
+      - main
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      deployments: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -31,20 +28,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: "pnpm"
+          node-version: "22"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --no-frozen-lockfile
 
       - name: Run Quality and Boilerplate Gates
         run: pnpm run test:quality
 
       - name: Build for Cloudflare Workers
+        run: pnpm run build:cf
         env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+          NEXT_PUBLIC_BRAND_NAME: ${{ secrets.NEXT_PUBLIC_BRAND_NAME }}
           NEXT_PUBLIC_PHONE_NUMBER: ${{ secrets.NEXT_PUBLIC_PHONE_NUMBER }}
           NEXT_PUBLIC_PHONE_TEL: ${{ secrets.NEXT_PUBLIC_PHONE_TEL }}
-          NEXT_PUBLIC_BRAND_NAME: ${{ secrets.NEXT_PUBLIC_BRAND_NAME }}
           NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
           NEXT_PUBLIC_NICHE: ${{ secrets.NEXT_PUBLIC_NICHE }}
           NEXT_PUBLIC_NICHE_PLURAL: ${{ secrets.NEXT_PUBLIC_NICHE_PLURAL }}
@@ -55,20 +53,18 @@ jobs:
           NEXT_PUBLIC_GSC_TOKEN: ${{ secrets.NEXT_PUBLIC_GSC_TOKEN }}
           NEXT_PUBLIC_LAUNCH_DATE: ${{ secrets.NEXT_PUBLIC_LAUNCH_DATE }}
           NEXT_PUBLIC_CONTENT_SALT: ${{ secrets.NEXT_PUBLIC_CONTENT_SALT }}
-        run: pnpm run build:worker
+          NEXT_PUBLIC_DESIGN_CONCEPT: ${{ secrets.NEXT_PUBLIC_DESIGN_CONCEPT }}
 
       - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
 
       - name: Purge Cloudflare Edge Cache
+        if: success()
         run: |
-          echo "Purging Cloudflare Edge Cache for Zone 92c65143ee08aae14acc6935b9034023..."
           curl -s -X POST "https://api.cloudflare.com/client/v4/zones/92c65143ee08aae14acc6935b9034023/purge_cache" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             --data '{"purge_everything":true}'
-          echo "Cache purge requested."
